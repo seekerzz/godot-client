@@ -34,6 +34,7 @@ const SEND_INTERVAL := 0.05  # 发送间隔(秒)
 @onready var playback_button: Button = %PlaybackButton
 @onready var delete_button: Button = %DeleteButton
 @onready var refresh_button: Button = %RefreshButton
+@onready var send_to_pc_button: Button = %SendToPCButton
 @onready var playback_progress: ProgressBar = %PlaybackProgress
 
 var udp: PacketPeerUDP
@@ -68,6 +69,8 @@ func _ready():
 		delete_button.pressed.connect(_on_delete_button_pressed)
 	if refresh_button:
 		refresh_button.pressed.connect(_on_refresh_button_pressed)
+	if send_to_pc_button:
+		send_to_pc_button.pressed.connect(_on_send_to_pc_pressed)
 	if recording_list:
 		recording_list.item_selected.connect(_on_recording_selected)
 
@@ -269,6 +272,88 @@ func save_recorded_data_locally():
 		print("[录制] 保存失败，错误码: " + str(err))
 		status_label.text = "保存失败: " + str(err)
 
+# ===== 文件传输到电脑功能 =====
+
+const FILE_CHUNK_SIZE := 1000  # 每片大小（字节），留余量避免UDP分片
+
+func send_file_to_pc(filename: String):
+	print("[文件传输] 开始传输文件: " + filename)
+
+	var file = FileAccess.open("user://" + filename, FileAccess.READ)
+	if not file:
+		status_label.text = "无法打开文件: " + filename
+		print("[文件传输] 错误: 无法打开文件")
+		return
+
+	var file_content = file.get_as_text()
+	file.close()
+
+	var total_size = file_content.length()
+	var total_chunks = ceil(float(total_size) / FILE_CHUNK_SIZE)
+
+	print("[文件传输] 文件大小: " + str(total_size) + " 字节, 分片数: " + str(total_chunks))
+
+	# 发送文件开始标记
+	if is_connected:
+		var start_marker = {
+			"type": "file_transfer_start",
+			"filename": filename,
+			"total_size": total_size,
+			"total_chunks": total_chunks,
+			"timestamp": Time.get_unix_time_from_system()
+		}
+		udp.put_packet(JSON.stringify(start_marker).to_utf8_buffer())
+		print("[文件传输] 发送开始标记")
+
+	status_label.text = "正在发送文件... 0%"
+	status_label.modulate = Color.CYAN
+
+	# 分片发送文件内容
+	for i in range(total_chunks):
+		var start_pos = i * FILE_CHUNK_SIZE
+		var end_pos = min((i + 1) * FILE_CHUNK_SIZE, total_size)
+		var chunk_data = file_content.substr(start_pos, end_pos - start_pos)
+
+		var chunk_packet = {
+			"type": "file_chunk",
+			"filename": filename,
+			"chunk_index": i,
+			"total_chunks": total_chunks,
+			"data": chunk_data
+		}
+
+		var json_str = JSON.stringify(chunk_packet)
+		var err = udp.put_packet(json_str.to_utf8_buffer())
+		if err != OK:
+			print("[文件传输] 错误: 发送分片失败 " + str(i) + " 错误码: " + str(err))
+			status_label.text = "发送失败"
+			return
+
+		# 打印前5个和每10个分片的发送日志
+		if i < 5 or i % 10 == 0:
+			print("[文件传输] 发送分片 #" + str(i) + " 大小: " + str(json_str.length()) + " 字节")
+
+		# 更新进度
+		var progress = int(float(i + 1) / total_chunks * 100)
+		status_label.text = "正在发送文件... " + str(progress) + "%"
+
+		# 增加延迟避免UDP丢包 (100ms = 10Hz)
+		await get_tree().create_timer(0.1).timeout
+
+	# 发送文件结束标记
+	if is_connected:
+		var end_marker = {
+			"type": "file_transfer_end",
+			"filename": filename,
+			"timestamp": Time.get_unix_time_from_system()
+		}
+		udp.put_packet(JSON.stringify(end_marker).to_utf8_buffer())
+		print("[文件传输] 发送结束标记")
+
+	status_label.text = "文件发送完成: " + parse_recording_filename(filename)
+	status_label.modulate = Color.GREEN
+	print("[文件传输] 完成")
+
 # ===== 回放功能 =====
 
 func refresh_recording_list():
@@ -421,6 +506,23 @@ func _on_delete_button_pressed():
 			current_playback_file = ""
 		else:
 			status_label.text = "删除失败"
+
+func _on_send_to_pc_pressed():
+	if recording_list:
+		var selected = recording_list.get_selected_items()
+		if selected.size() == 0:
+			status_label.text = "请先选择要发送的文件"
+			return
+
+		var index = selected[0]
+		var filename = recording_list.get_item_metadata(index)
+
+		if not is_connected:
+			status_label.text = "未连接到电脑"
+			return
+
+		# 调用文件传输函数
+		send_file_to_pc(filename)
 
 func _on_refresh_button_pressed():
 	refresh_recording_list()

@@ -247,3 +247,10 @@ custom_minimum_size = Vector2(120, 70)
 layout_mode = 2
 theme_override_font_sizes/font_size = 32
 text = "刷新"
+
+[node name="SendToPCButton" type="Button" parent="VBoxContainer/PlaybackSection/PlaybackControls"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 70)
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "发送到电脑"
