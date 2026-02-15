@@ -336,29 +336,36 @@ func start_playback():
 		status_label.text = "请先选择一个录制文件"
 		return
 
+	print("[回放] 尝试打开文件: " + current_playback_file)
 	var file = FileAccess.open("user://" + current_playback_file, FileAccess.READ)
 	if not file:
 		status_label.text = "无法打开文件: " + current_playback_file
+		print("[回放] 错误: 无法打开文件")
 		return
 
 	var content = file.get_as_text()
 	file.close()
+	print("[回放] 文件内容长度: " + str(content.length()))
 
 	var json = JSON.new()
 	var err = json.parse(content)
 	if err != OK:
 		status_label.text = "文件解析失败"
+		print("[回放] 错误: JSON 解析失败")
 		return
 
 	var data = json.get_data()
 	if not data.has("frames"):
 		status_label.text = "无效的数据格式"
+		print("[回放] 错误: 没有 frames 字段")
 		return
 
 	playback_frames = data["frames"]
 	playback_index = 0
 	playback_timer = 0.0
 	is_playing = true
+
+	print("[回放] 加载成功，共 " + str(playback_frames.size()) + " 帧")
 
 	# 发送回放开始标记
 	if is_connected:
@@ -368,11 +375,15 @@ func start_playback():
 			"frame_count": playback_frames.size(),
 			"timestamp": Time.get_unix_time_from_system()
 		}
-		udp.put_packet(JSON.stringify(marker).to_utf8_buffer())
+		var marker_str = JSON.stringify(marker)
+		udp.put_packet(marker_str.to_utf8_buffer())
+		print("[回放] 发送开始标记: " + marker_str)
+	else:
+		print("[回放] 警告: 未连接到服务器")
 
 	playback_button.text = "停止回放"
 	playback_button.modulate = Color.ORANGE
-	status_label.text = "开始回放: " + parse_recording_filename(current_playback_file)
+	status_label.text = "开始回放: " + parse_recording_filename(current_playback_file) + " [" + str(playback_frames.size()) + " 帧]"
 
 func stop_playback():
 	is_playing = false
