@@ -7,6 +7,7 @@ const DISCOVERY_PORT_START := 49000
 const DISCOVERY_PORT_END := 49010
 const PAIRING_TIMEOUT := 3.0  # 配对超时(秒)
 const SEND_INTERVAL := 0.05   # 发送间隔(秒)
+const CONFIG_FILE := "user://pairing_config.json"
 
 @onready var accel_x: Label = %AccelX
 @onready var accel_y: Label = %AccelY
@@ -32,6 +33,8 @@ const SEND_INTERVAL := 0.05   # 发送间隔(秒)
 @onready var pair_button: Button = %PairButton
 @onready var scan_button: Button = %ScanButton
 @onready var pairing_status: Label = %PairingStatus
+@onready var saved_info_label: Label = %SavedInfo
+@onready var forget_button: Button = %ForgetButton
 
 var discovery_socket: PacketPeerUDP
 var data_socket: PacketPeerUDP
@@ -62,8 +65,73 @@ func _ready():
 	# 连接按钮信号
 	pair_button.pressed.connect(_on_pair_button_pressed)
 	scan_button.pressed.connect(_on_scan_button_pressed)
+	forget_button.pressed.connect(_on_forget_button_pressed)
 
-	update_status("等待配对...")
+	# 显示已保存的配对信息
+	update_saved_info_display()
+
+	# 尝试自动连接
+	try_auto_connect()
+
+# 保存配对信息到本地
+func save_pairing_config(pc_ip: String, data_port: int):
+	var config = {
+		"pc_ip": pc_ip,
+		"data_port": data_port,
+		"timestamp": Time.get_unix_time_from_system()
+	}
+	var file = FileAccess.open(CONFIG_FILE, FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(config))
+		file.close()
+		print("[配置] 配对信息已保存")
+
+# 加载配对信息
+func load_pairing_config() -> Dictionary:
+	if FileAccess.file_exists(CONFIG_FILE):
+		var file = FileAccess.open(CONFIG_FILE, FileAccess.READ)
+		if file:
+			var content = file.get_as_text()
+			file.close()
+			var json = JSON.new()
+			var err = json.parse(content)
+			if err == OK:
+				return json.get_data()
+	return {}
+
+# 尝试自动连接
+func try_auto_connect():
+	var config = load_pairing_config()
+	if config.is_empty():
+		update_status("等待配对...")
+		return
+
+	current_pc_ip = config.get("pc_ip", "")
+	current_data_port = config.get("data_port", -1)
+
+	if current_pc_ip.is_empty() or current_data_port == -1:
+		update_status("等待配对...")
+		return
+
+	# 尝试连接保存的地址
+	pairing_status.text = "尝试自动连接..."
+	data_socket.set_dest_address(current_pc_ip, current_data_port)
+
+	# 发送测试数据包
+	var test_data = {"type": "ping", "timestamp": Time.get_unix_time_from_system()}
+	var err = data_socket.put_packet(JSON.stringify(test_data).to_utf8_buffer())
+
+	if err == OK:
+		# 等待一小段时间看是否能收到数据（实际验证在_process中）
+		await get_tree().create_timer(0.5).timeout
+		# 如果连接成功，数据应该能发送出去
+		is_paired = true
+		pairing_panel.visible = false
+		update_status("已自动连接: " + current_pc_ip)
+		print("[连接] 自动连接成功: ", current_pc_ip, ":", current_data_port)
+	else:
+		pairing_status.text = "自动连接失败，请重新配对"
+		update_status("等待配对...")
 
 func _on_pair_button_pressed():
 	var code = pairing_code_input.text.strip_edges()
@@ -90,6 +158,36 @@ func _on_scan_button_pressed():
 	scan_button.disabled = true
 
 	scan_for_pc()
+
+func _on_forget_button_pressed():
+	# 清除配对信息
+	var dir = DirAccess.open("user://")
+	if dir:
+		dir.remove(CONFIG_FILE)
+
+	is_paired = false
+	current_pc_ip = ""
+	current_data_port = -1
+
+	# 更新UI
+	update_saved_info_display()
+	pairing_status.text = "配对信息已清除"
+	update_status("等待配对...")
+	print("[配置] 配对信息已清除")
+
+func update_saved_info_display():
+	var config = load_pairing_config()
+	if not config.is_empty():
+		var pc_ip = config.get("pc_ip", "")
+		if saved_info_label:
+			saved_info_label.text = "已保存的PC: " + pc_ip
+		if forget_button:
+			forget_button.visible = true
+	else:
+		if saved_info_label:
+			saved_info_label.text = ""
+		if forget_button:
+			forget_button.visible = false
 
 func scan_for_pc():
 	var found := false
@@ -155,6 +253,9 @@ func attempt_pairing(pairing_code: String):
 
 					# 设置数据socket目标
 					data_socket.set_dest_address(pc_ip, current_data_port)
+
+					# 保存配对信息
+					save_pairing_config(pc_ip, current_data_port)
 
 					pairing_status.text = "配对成功! 端口: " + str(current_data_port)
 					pairing_panel.visible = false

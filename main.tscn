@@ -246,6 +246,19 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 32
 text = "自动扫描PC"
 
+[node name="SavedInfo" type="Label" parent="PairingPanel/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = ""
+horizontal_alignment = 1
+
+[node name="ForgetButton" type="Button" parent="PairingPanel/VBoxContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "清除配对信息"
+
 [node name="PairingStatus" type="Label" parent="PairingPanel/VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2
