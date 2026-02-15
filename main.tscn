@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3 uid="uid://bqxpp8xq4p1j2"]
 
-[ext_resource type="Script" path="res://sensor_display.gd" id="1_abc123"]
+[ext_resource type="Script" path="res://sensor_sender.gd" id="1_abc123"]
 
 [node name="Main" type="Control"]
 layout_mode = 3

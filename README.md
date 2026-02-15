@@ -1,6 +1,12 @@
-# Godot Android 传感器数据展示应用
+# Godot Android 传感器数据发送应用
 
-一个基于 Godot 4.3 开发的 Android 应用，实时显示手机加速度计、陀螺仪、重力传感器和磁力计数据。
+一个基于 Godot 4.3 开发的 Android 应用，实时读取手机传感器数据并通过UDP网络发送到PC端进行3D可视化。
+
+## 功能特性
+
+- **传感器读取**: 加速度计、陀螺仪、重力传感器、磁力计
+- **网络发送**: 通过UDP将数据实时发送到PC端
+- **本地显示**: 同时显示传感器数值
 
 ---
 
@@ -16,12 +22,22 @@
 ## 项目结构
 
 ```
-godot_snake/
+godot_client/
 ├── icon.svg              # 应用图标
 ├── main.tscn             # 主场景文件
-├── sensor_display.gd     # 传感器数据显示脚本
+├── sensor_sender.gd      # 传感器数据发送脚本
 ├── export_presets.cfg    # Android 导出配置
 └── sensor_display.apk    # 构建好的 APK 文件
+```
+
+## 配置说明
+
+### 设置PC端IP地址
+
+编辑 `sensor_sender.gd`，修改为你的PC实际IP地址：
+
+```gdscript
+const SERVER_IP := "192.168.50.11"  # 修改为你的PC IP地址
 ```
 
 ---

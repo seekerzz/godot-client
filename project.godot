@@ -34,3 +34,7 @@ sensors/gyroscope=true
 
 renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true
+
+[network]
+
+limits/udp_server/max_clients=1
