@@ -146,6 +146,14 @@ func send_sensor_data(accel: Vector3, gyro: Vector3, gravity: Vector3, magneto: 
 		"timestamp": Time.get_unix_time_from_system(),
 		"recorded": is_recording
 	}
+
+	# 如果正在录制，保存到本地缓存
+	if is_recording:
+		recorded_frames.append(data.duplicate())
+		# 更新UI显示帧数
+		if record_status_label:
+			record_status_label.text = "录制中... 帧数: " + str(recorded_frames.size())
+
 	send_data_packet(data)
 
 func send_data_packet(data: Dictionary):
@@ -229,6 +237,7 @@ func update_record_button_ui():
 
 func save_recorded_data_locally():
 	if recorded_frames.is_empty():
+		print("[录制] 没有数据需要保存")
 		return
 
 	var datetime = Time.get_datetime_dict_from_system()
@@ -236,6 +245,9 @@ func save_recorded_data_locally():
 		datetime.year, datetime.month, datetime.day,
 		datetime.hour, datetime.minute, datetime.second
 	]
+
+	print("[录制] 正在保存到: " + filename)
+	print("[录制] 帧数: " + str(recorded_frames.size()))
 
 	var file = FileAccess.open(filename, FileAccess.WRITE)
 	if file:
@@ -250,18 +262,27 @@ func save_recorded_data_locally():
 		}
 		file.store_string(JSON.stringify(output, "\t"))
 		file.close()
-		print("[录制] 数据已保存到: " + filename)
+		print("[录制] 数据已保存成功")
+		status_label.text = "录制已保存: " + filename.get_file()
+	else:
+		var err = FileAccess.get_open_error()
+		print("[录制] 保存失败，错误码: " + str(err))
+		status_label.text = "保存失败: " + str(err)
 
 # ===== 回放功能 =====
 
 func refresh_recording_list():
 	if not recording_list:
+		print("[列表] recording_list 节点未找到")
 		return
 
 	recording_list.clear()
+	print("[列表] 正在刷新录制列表...")
 
 	var dir = DirAccess.open("user://")
 	if not dir:
+		print("[列表] 无法打开 user:// 目录")
+		status_label.text = "无法访问存储目录"
 		return
 
 	dir.list_dir_begin()
@@ -271,10 +292,13 @@ func refresh_recording_list():
 	while file_name != "":
 		if file_name.begins_with("record_") and file_name.ends_with(".json"):
 			files.append(file_name)
+			print("[列表] 发现文件: " + file_name)
 		file_name = dir.get_next()
 
 	files.sort()
 	files.reverse()  # 最新的在前
+
+	print("[列表] 共发现 " + str(files.size()) + " 个录制文件")
 
 	for f in files:
 		# 解析文件名显示友好名称
