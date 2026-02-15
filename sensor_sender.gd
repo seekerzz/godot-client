@@ -29,6 +29,13 @@ const SEND_INTERVAL := 0.05  # 发送间隔(秒)
 @onready var record_button: Button = %RecordButton
 @onready var record_status_label: Label = %RecordStatusLabel
 
+# 回放UI
+@onready var recording_list: ItemList = %RecordingList
+@onready var playback_button: Button = %PlaybackButton
+@onready var delete_button: Button = %DeleteButton
+@onready var refresh_button: Button = %RefreshButton
+@onready var playback_progress: ProgressBar = %PlaybackProgress
+
 var udp: PacketPeerUDP
 var send_timer: float = 0.0
 var is_connected := false
@@ -36,6 +43,13 @@ var is_connected := false
 # 录制功能
 var is_recording := false
 var recorded_frames: Array[Dictionary] = []
+
+# 回放功能
+var is_playing := false
+var playback_frames: Array[Dictionary] = []
+var playback_index: int = 0
+var playback_timer: float = 0.0
+var current_playback_file: String = ""
 
 func _ready():
 	init_network()
@@ -46,6 +60,19 @@ func _ready():
 	if record_button:
 		record_button.pressed.connect(_on_record_button_pressed)
 		update_record_button_ui()
+
+	# 连接回放按钮
+	if playback_button:
+		playback_button.pressed.connect(_on_playback_button_pressed)
+	if delete_button:
+		delete_button.pressed.connect(_on_delete_button_pressed)
+	if refresh_button:
+		refresh_button.pressed.connect(_on_refresh_button_pressed)
+	if recording_list:
+		recording_list.item_selected.connect(_on_recording_selected)
+
+	# 加载录制列表
+	refresh_recording_list()
 
 func init_network():
 	udp = PacketPeerUDP.new()
@@ -60,6 +87,14 @@ func init_network():
 		status_label.modulate = Color.RED
 
 func _process(delta):
+	# 处理回放
+	if is_playing:
+		playback_timer += delta
+		if playback_timer >= SEND_INTERVAL:
+			playback_timer = 0.0
+			send_next_playback_frame()
+		return
+
 	# 获取传感器数据
 	var accel = Input.get_accelerometer()
 	var gyro = Input.get_gyroscope()
@@ -76,13 +111,14 @@ func _process(delta):
 		send_timer = 0.0
 
 	# 更新状态
-	if accel == Vector3.ZERO and gyro == Vector3.ZERO:
-		status_label.text = "状态: 等待传感器数据..."
-		status_label.modulate = Color.YELLOW
-	else:
-		if is_connected:
-			status_label.text = "状态: 正常发送数据"
-			status_label.modulate = Color.GREEN
+	if not is_playing:
+		if accel == Vector3.ZERO and gyro == Vector3.ZERO:
+			status_label.text = "状态: 等待传感器数据..."
+			status_label.modulate = Color.YELLOW
+		else:
+			if is_connected:
+				status_label.text = "状态: 正常发送数据"
+				status_label.modulate = Color.GREEN
 
 func update_display(accel: Vector3, gyro: Vector3, gravity: Vector3, magneto: Vector3):
 	accel_x.text = "X: %.3f" % accel.x
@@ -110,17 +146,35 @@ func send_sensor_data(accel: Vector3, gyro: Vector3, gravity: Vector3, magneto: 
 		"timestamp": Time.get_unix_time_from_system(),
 		"recorded": is_recording
 	}
+	send_data_packet(data)
 
-	# 如果正在录制，保存到本地缓存
-	if is_recording:
-		recorded_frames.append(data.duplicate())
-		update_record_button_ui()
-
+func send_data_packet(data: Dictionary):
 	var json_str = JSON.stringify(data)
 	var packet = json_str.to_utf8_buffer()
 	var err = udp.put_packet(packet)
 	if err == OK:
 		print("[发送] ", json_str)
+
+func send_next_playback_frame():
+	if playback_index >= playback_frames.size():
+		stop_playback()
+		return
+
+	var frame = playback_frames[playback_index]
+	# 添加回放标记
+	frame["playback"] = true
+	frame["frame_index"] = playback_index
+	frame["total_frames"] = playback_frames.size()
+
+	send_data_packet(frame)
+
+	# 更新进度
+	playback_index += 1
+	if playback_progress:
+		playback_progress.value = float(playback_index) / playback_frames.size() * 100
+
+	status_label.text = "回放中: %d/%d" % [playback_index, playback_frames.size()]
+	status_label.modulate = Color.CYAN
 
 func _on_record_button_pressed():
 	if is_recording:
@@ -153,6 +207,9 @@ func stop_recording():
 	save_recorded_data_locally()
 	print("[录制] 结束录制，共 " + str(recorded_frames.size()) + " 帧")
 
+	# 刷新列表
+	refresh_recording_list()
+
 func update_record_button_ui():
 	if record_button:
 		if is_recording:
@@ -182,10 +239,160 @@ func save_recorded_data_locally():
 
 	var file = FileAccess.open(filename, FileAccess.WRITE)
 	if file:
-		file.store_string(JSON.stringify(recorded_frames))
+		var output = {
+			"record_date": "%04d-%02d-%02d %02d:%02d:%02d" % [
+				datetime.year, datetime.month, datetime.day,
+				datetime.hour, datetime.minute, datetime.second
+			],
+			"frame_count": recorded_frames.size(),
+			"duration": recorded_frames.size() * SEND_INTERVAL,
+			"frames": recorded_frames
+		}
+		file.store_string(JSON.stringify(output, "\t"))
 		file.close()
 		print("[录制] 数据已保存到: " + filename)
 
+# ===== 回放功能 =====
+
+func refresh_recording_list():
+	if not recording_list:
+		return
+
+	recording_list.clear()
+
+	var dir = DirAccess.open("user://")
+	if not dir:
+		return
+
+	dir.list_dir_begin()
+	var file_name = dir.get_next()
+	var files: Array[String] = []
+
+	while file_name != "":
+		if file_name.begins_with("record_") and file_name.ends_with(".json"):
+			files.append(file_name)
+		file_name = dir.get_next()
+
+	files.sort()
+	files.reverse()  # 最新的在前
+
+	for f in files:
+		# 解析文件名显示友好名称
+		var display_name = parse_recording_filename(f)
+		recording_list.add_item(display_name)
+		recording_list.set_item_metadata(recording_list.get_item_count() - 1, f)
+
+func parse_recording_filename(filename: String) -> String:
+	# record_YYYYMMDD_HHMMSS.json -> 2024年MM月DD日 HH:MM:SS
+	if filename.length() < 22:
+		return filename
+
+	var year = filename.substr(7, 4)
+	var month = filename.substr(11, 2)
+	var day = filename.substr(13, 2)
+	var hour = filename.substr(16, 2)
+	var minute = filename.substr(18, 2)
+	var second = filename.substr(20, 2)
+
+	return "%s年%s月%s日 %s:%s:%s" % [year, month, day, hour, minute, second]
+
+func _on_recording_selected(index: int):
+	if recording_list:
+		current_playback_file = recording_list.get_item_metadata(index)
+		status_label.text = "已选择: " + parse_recording_filename(current_playback_file)
+
+func _on_playback_button_pressed():
+	if is_playing:
+		stop_playback()
+	elif current_playback_file != "":
+		start_playback()
+
+func start_playback():
+	if current_playback_file == "":
+		status_label.text = "请先选择一个录制文件"
+		return
+
+	var file = FileAccess.open("user://" + current_playback_file, FileAccess.READ)
+	if not file:
+		status_label.text = "无法打开文件: " + current_playback_file
+		return
+
+	var content = file.get_as_text()
+	file.close()
+
+	var json = JSON.new()
+	var err = json.parse(content)
+	if err != OK:
+		status_label.text = "文件解析失败"
+		return
+
+	var data = json.get_data()
+	if not data.has("frames"):
+		status_label.text = "无效的数据格式"
+		return
+
+	playback_frames = data["frames"]
+	playback_index = 0
+	playback_timer = 0.0
+	is_playing = true
+
+	# 发送回放开始标记
+	if is_connected:
+		var marker = {
+			"type": "playback_start",
+			"filename": current_playback_file,
+			"frame_count": playback_frames.size(),
+			"timestamp": Time.get_unix_time_from_system()
+		}
+		udp.put_packet(JSON.stringify(marker).to_utf8_buffer())
+
+	playback_button.text = "停止回放"
+	playback_button.modulate = Color.ORANGE
+	status_label.text = "开始回放: " + parse_recording_filename(current_playback_file)
+
+func stop_playback():
+	is_playing = false
+	playback_frames.clear()
+	playback_index = 0
+
+	# 发送回放停止标记
+	if is_connected:
+		var marker = {
+			"type": "playback_stop",
+			"timestamp": Time.get_unix_time_from_system()
+		}
+		udp.put_packet(JSON.stringify(marker).to_utf8_buffer())
+
+	playback_button.text = "开始回放"
+	playback_button.modulate = Color.WHITE
+	if playback_progress:
+		playback_progress.value = 0
+	status_label.text = "回放已停止"
+
+func _on_delete_button_pressed():
+	if recording_list:
+		var selected = recording_list.get_selected_items()
+		if selected.size() == 0:
+			status_label.text = "请先选择要删除的文件"
+			return
+
+		var index = selected[0]
+		var filename = recording_list.get_item_metadata(index)
+
+		var err = DirAccess.remove_absolute("user://" + filename)
+		if err == OK:
+			status_label.text = "已删除: " + parse_recording_filename(filename)
+			refresh_recording_list()
+			current_playback_file = ""
+		else:
+			status_label.text = "删除失败"
+
+func _on_refresh_button_pressed():
+	refresh_recording_list()
+	status_label.text = "列表已刷新"
+
 func _exit_tree():
+	if is_playing:
+		stop_playback()
 	if udp:
 		udp.close()

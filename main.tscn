@@ -193,3 +193,57 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 28
 text = "未录制"
 horizontal_alignment = 1
+
+[node name="HSeparator5" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="PlaybackSection" type="VBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="PlaybackTitle" type="Label" parent="VBoxContainer/PlaybackSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 42
+text = "录制回放"
+color = Color(1, 0.4, 0.4, 1)
+horizontal_alignment = 1
+
+[node name="RecordingList" type="ItemList" parent="VBoxContainer/PlaybackSection"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(0, 200)
+theme_override_font_sizes/font_size = 28
+
+[node name="PlaybackProgress" type="ProgressBar" parent="VBoxContainer/PlaybackSection"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+max_value = 100.0
+step = 0.1
+
+[node name="PlaybackControls" type="HBoxContainer" parent="VBoxContainer/PlaybackSection"]
+layout_mode = 2
+theme_override_constants/separation = 20
+alignment = 1
+
+[node name="PlaybackButton" type="Button" parent="VBoxContainer/PlaybackSection/PlaybackControls"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 70)
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "开始回放"
+
+[node name="DeleteButton" type="Button" parent="VBoxContainer/PlaybackSection/PlaybackControls"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 70)
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "删除"
+
+[node name="RefreshButton" type="Button" parent="VBoxContainer/PlaybackSection/PlaybackControls"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 70)
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "刷新"
