@@ -36,6 +36,10 @@ const CONFIG_FILE := "user://pairing_config.json"
 @onready var saved_info_label: Label = %SavedInfo
 @onready var forget_button: Button = %ForgetButton
 
+# 录制UI
+@onready var record_button: Button = %RecordButton
+@onready var record_status_label: Label = %RecordStatusLabel
+
 var discovery_socket: PacketPeerUDP
 var data_socket: PacketPeerUDP
 var current_pc_ip: String = ""
@@ -44,6 +48,10 @@ var current_data_port: int = -1
 var send_timer: float = 0.0
 var is_paired := false
 var is_connecting := false
+
+# 录制功能
+var is_recording := false
+var recorded_frames: Array[Dictionary] = []
 
 func _ready():
 	# 初始化发现socket
@@ -66,6 +74,11 @@ func _ready():
 	pair_button.pressed.connect(_on_pair_button_pressed)
 	scan_button.pressed.connect(_on_scan_button_pressed)
 	forget_button.pressed.connect(_on_forget_button_pressed)
+
+	# 录制按钮信号
+	if record_button:
+		record_button.pressed.connect(_on_record_button_pressed)
+		update_record_button_ui()
 
 	# 显示已保存的配对信息
 	update_saved_info_display()
@@ -323,15 +336,21 @@ func send_sensor_data(accel: Vector3, gyro: Vector3, gravity: Vector3, magneto: 
 		"gyro": {"x": gyro.x, "y": gyro.y, "z": gyro.z},
 		"gravity": {"x": gravity.x, "y": gravity.y, "z": gravity.z},
 		"magneto": {"x": magneto.x, "y": magneto.y, "z": magneto.z},
-		"timestamp": Time.get_unix_time_from_system()
+		"timestamp": Time.get_unix_time_from_system(),
+		"recorded": is_recording
 	}
+
+	# 如果正在录制，保存到本地缓存
+	if is_recording:
+		recorded_frames.append(data.duplicate())
+		update_record_button_ui()
 
 	var json_str = JSON.stringify(data)
 	var packet = json_str.to_utf8_buffer()
 	var err = data_socket.put_packet(packet)
 
 	if err == OK:
-		update_status("发送中...")
+		update_status("发送中..." + (" [录制]" if is_recording else ""))
 	else:
 		update_status("发送失败")
 
@@ -346,6 +365,71 @@ func disconnect():
 	pairing_panel.visible = true
 	pairing_status.text = "已断开"
 	update_status("等待配对...")
+
+func _on_record_button_pressed():
+	if is_recording:
+		stop_recording()
+	else:
+		start_recording()
+
+func start_recording():
+	is_recording = true
+	recorded_frames.clear()
+	update_record_button_ui()
+
+	# 发送录制开始标记到服务端
+	if is_paired:
+		var marker = {"type": "record_start", "timestamp": Time.get_unix_time_from_system()}
+		data_socket.put_packet(JSON.stringify(marker).to_utf8_buffer())
+
+	print("[录制] 开始录制")
+
+func stop_recording():
+	is_recording = false
+	update_record_button_ui()
+
+	# 发送录制结束标记到服务端
+	if is_paired:
+		var marker = {"type": "record_stop", "timestamp": Time.get_unix_time_from_system()}
+		data_socket.put_packet(JSON.stringify(marker).to_utf8_buffer())
+
+	# 保存录制数据到本地（备用）
+	save_recorded_data_locally()
+
+	print("[录制] 结束录制，共 ", recorded_frames.size(), " 帧")
+
+func update_record_button_ui():
+	if record_button:
+		if is_recording:
+			record_button.text = "结束录制"
+			record_button.modulate = Color.RED
+		else:
+			record_button.text = "开始录制"
+			record_button.modulate = Color.WHITE
+
+	if record_status_label:
+		if is_recording:
+			record_status_label.text = "录制中... 帧数: " + str(recorded_frames.size())
+			record_status_label.modulate = Color.RED
+		else:
+			record_status_label.text = "未录制"
+			record_status_label.modulate = Color.WHITE
+
+func save_recorded_data_locally():
+	if recorded_frames.is_empty():
+		return
+
+	var datetime = Time.get_datetime_dict_from_system()
+	var filename = "user://record_%04d%02d%02d_%02d%02d%02d.json" % [
+		datetime.year, datetime.month, datetime.day,
+		datetime.hour, datetime.minute, datetime.second
+	]
+
+	var file = FileAccess.open(filename, FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(recorded_frames))
+		file.close()
+		print("[录制] 数据已保存到: ", filename)
 
 func _exit_tree():
 	if discovery_socket:
