@@ -1,11 +1,12 @@
 extends Control
 
-# 传感器数据显示与发送脚本 - Godot 4
-# 将传感器数据通过UDP发送到PC端
+# 传感器数据显示与发送脚本 - 带配对功能
+# 通过UDP发送传感器数据到PC端
 
-const SERVER_IP := "192.168.50.64"  # PC IP地址
-const SERVER_PORT := 49555
-const SEND_INTERVAL := 0.05  # 发送间隔(秒)
+const DISCOVERY_PORT_START := 49000
+const DISCOVERY_PORT_END := 49010
+const PAIRING_TIMEOUT := 3.0  # 配对超时(秒)
+const SEND_INTERVAL := 0.05   # 发送间隔(秒)
 
 @onready var accel_x: Label = %AccelX
 @onready var accel_y: Label = %AccelY
@@ -25,28 +26,164 @@ const SEND_INTERVAL := 0.05  # 发送间隔(秒)
 
 @onready var status_label: Label = %StatusLabel
 
-var udp: PacketPeerUDP
+# 配对UI
+@onready var pairing_panel: Panel = %PairingPanel
+@onready var pairing_code_input: LineEdit = %PairingCodeInput
+@onready var pair_button: Button = %PairButton
+@onready var scan_button: Button = %ScanButton
+@onready var pairing_status: Label = %PairingStatus
+
+var discovery_socket: PacketPeerUDP
+var data_socket: PacketPeerUDP
+var current_pc_ip: String = ""
+var current_data_port: int = -1
+
 var send_timer: float = 0.0
-var is_connected := false
+var is_paired := false
+var is_connecting := false
 
 func _ready():
-	init_network()
-	status_label.text = "状态: 传感器已启动"
-	status_label.modulate = Color.GREEN
-
-func init_network():
-	udp = PacketPeerUDP.new()
-	var err = udp.bind(0)  # 绑定任意可用端口
-	if err == OK:
-		udp.set_dest_address(SERVER_IP, SERVER_PORT)
-		is_connected = true
-		status_label.text = "状态: 网络已连接"
-		status_label.modulate = Color.GREEN
-	else:
-		status_label.text = "状态: 网络连接失败"
+	# 初始化发现socket
+	discovery_socket = PacketPeerUDP.new()
+	var err = discovery_socket.bind(0)  # 绑定任意端口
+	if err != OK:
+		status_label.text = "状态: 网络初始化失败"
 		status_label.modulate = Color.RED
+		return
+
+	# 初始化数据socket
+	data_socket = PacketPeerUDP.new()
+	err = data_socket.bind(0)
+	if err != OK:
+		status_label.text = "状态: 数据socket初始化失败"
+		status_label.modulate = Color.RED
+		return
+
+	# 连接按钮信号
+	pair_button.pressed.connect(_on_pair_button_pressed)
+	scan_button.pressed.connect(_on_scan_button_pressed)
+
+	update_status("等待配对...")
+
+func _on_pair_button_pressed():
+	var code = pairing_code_input.text.strip_edges()
+	if code.length() != 4:
+		pairing_status.text = "请输入4位配对码"
+		return
+
+	if is_connecting:
+		return
+
+	is_connecting = true
+	pairing_status.text = "正在配对..."
+	pair_button.disabled = true
+
+	# 启动配对流程
+	attempt_pairing(code)
+
+func _on_scan_button_pressed():
+	if is_connecting:
+		return
+
+	is_connecting = true
+	pairing_status.text = "正在扫描PC..."
+	scan_button.disabled = true
+
+	scan_for_pc()
+
+func scan_for_pc():
+	var found := false
+
+	for port in range(DISCOVERY_PORT_START, DISCOVERY_PORT_END + 1):
+		pairing_status.text = "尝试端口 " + str(port) + "..."
+
+		# 发送发现请求到广播地址
+		discovery_socket.set_dest_address("255.255.255.255", port)
+		discovery_socket.put_packet("DISCOVER".to_utf8_buffer())
+
+		# 等待回复
+		var start_time := Time.get_ticks_msec()
+		while Time.get_ticks_msec() - start_time < 1000:  # 1秒超时
+			if discovery_socket.get_available_bytes() > 0:
+				var packet = discovery_socket.get_packet()
+				var data = packet.get_string_from_utf8()
+				var pc_ip = discovery_socket.get_packet_ip()
+
+				if data.begins_with("SERVER_INFO:"):
+					current_pc_ip = pc_ip
+					found = true
+					pairing_status.text = "发现PC: " + pc_ip
+					break
+
+			await get_tree().process_frame
+
+		if found:
+			break
+
+	if not found:
+		pairing_status.text = "未找到PC，请确认PC端已启动"
+
+	is_connecting = false
+	scan_button.disabled = false
+
+func attempt_pairing(pairing_code: String):
+	var paired := false
+
+	# 尝试所有发现端口
+	for port in range(DISCOVERY_PORT_START, DISCOVERY_PORT_END + 1):
+		pairing_status.text = "尝试端口 " + str(port) + "..."
+
+		# 发送配对请求
+		discovery_socket.set_dest_address("255.255.255.255", port)
+		var request = "PAIR:" + pairing_code
+		discovery_socket.put_packet(request.to_utf8_buffer())
+
+		# 等待回复
+		var start_time := Time.get_ticks_msec()
+		while Time.get_ticks_msec() - start_time < int(PAIRING_TIMEOUT * 1000):
+			if discovery_socket.get_available_bytes() > 0:
+				var packet = discovery_socket.get_packet()
+				var data = packet.get_string_from_utf8()
+				var pc_ip = discovery_socket.get_packet_ip()
+
+				if data.begins_with("PAIRED:"):
+					# 配对成功
+					current_data_port = int(data.substr(7))
+					current_pc_ip = pc_ip
+					is_paired = true
+					paired = true
+
+					# 设置数据socket目标
+					data_socket.set_dest_address(pc_ip, current_data_port)
+
+					pairing_status.text = "配对成功! 端口: " + str(current_data_port)
+					pairing_panel.visible = false
+					update_status("已连接: " + pc_ip)
+					break
+
+				elif data == "ERROR:WRONG_CODE":
+					pairing_status.text = "配对码错误"
+					break
+
+				elif data.begins_with("ERROR:"):
+					pairing_status.text = "配对失败: " + data
+					break
+
+			await get_tree().process_frame
+
+		if paired:
+			break
+
+	if not paired and pairing_status.text != "配对码错误":
+		pairing_status.text = "配对超时，请重试"
+
+	is_connecting = false
+	pair_button.disabled = false
 
 func _process(delta):
+	if not is_paired:
+		return
+
 	# 获取传感器数据
 	var accel = Input.get_accelerometer()
 	var gyro = Input.get_gyroscope()
@@ -58,18 +195,9 @@ func _process(delta):
 
 	# 定时发送数据
 	send_timer += delta
-	if send_timer >= SEND_INTERVAL and is_connected:
+	if send_timer >= SEND_INTERVAL:
 		send_sensor_data(accel, gyro, gravity, magneto)
 		send_timer = 0.0
-
-	# 更新状态
-	if accel == Vector3.ZERO and gyro == Vector3.ZERO:
-		status_label.text = "状态: 等待传感器数据..."
-		status_label.modulate = Color.YELLOW
-	else:
-		if is_connected:
-			status_label.text = "状态: 正常发送数据"
-			status_label.modulate = Color.GREEN
 
 func update_display(accel: Vector3, gyro: Vector3, gravity: Vector3, magneto: Vector3):
 	accel_x.text = "X: %.3f" % accel.x
@@ -99,10 +227,27 @@ func send_sensor_data(accel: Vector3, gyro: Vector3, gravity: Vector3, magneto: 
 
 	var json_str = JSON.stringify(data)
 	var packet = json_str.to_utf8_buffer()
-	var err = udp.put_packet(packet)
+	var err = data_socket.put_packet(packet)
+
 	if err == OK:
-		print("[发送] ", json_str)
+		update_status("发送中...")
+	else:
+		update_status("发送失败")
+
+func update_status(text: String):
+	if status_label:
+		status_label.text = "状态: " + text
+
+func disconnect():
+	is_paired = false
+	current_pc_ip = ""
+	current_data_port = -1
+	pairing_panel.visible = true
+	pairing_status.text = "已断开"
+	update_status("等待配对...")
 
 func _exit_tree():
-	if udp:
-		udp.close()
+	if discovery_socket:
+		discovery_socket.close()
+	if data_socket:
+		data_socket.close()
