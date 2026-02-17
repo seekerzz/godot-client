@@ -37,3 +37,6 @@ desktop.ini
 
 # Debug keystore
 debug.keystore
+
+# Log files
+*.txt
