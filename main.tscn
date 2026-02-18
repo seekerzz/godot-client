@@ -167,6 +167,44 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 36
 text = "Z: 0.000"
 
+[node name="HSeparatorQuat" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="QuaternionSection" type="VBoxContainer" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="QuaternionTitle" type="Label" parent="VBoxContainer/QuaternionSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 42
+text = "Quaternion (x, y, z, w)"
+color = Color(0.7, 0.9, 1, 1)
+
+[node name="QuatX" type="Label" parent="VBoxContainer/QuaternionSection"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 36
+text = "X: 0.000"
+
+[node name="QuatY" type="Label" parent="VBoxContainer/QuaternionSection"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 36
+text = "Y: 0.000"
+
+[node name="QuatZ" type="Label" parent="VBoxContainer/QuaternionSection"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 36
+text = "Z: 0.000"
+
+[node name="QuatW" type="Label" parent="VBoxContainer/QuaternionSection"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 36
+text = "W: 1.000"
+
 [node name="StatusLabel" type="Label" parent="VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2

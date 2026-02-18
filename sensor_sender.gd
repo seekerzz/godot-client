@@ -23,6 +23,11 @@ const SEND_INTERVAL := 0.05  # 发送间隔(秒)
 @onready var magneto_y: Label = %MagnetoY
 @onready var magneto_z: Label = %MagnetoZ
 
+@onready var quat_x: Label = %QuatX
+@onready var quat_y: Label = %QuatY
+@onready var quat_z: Label = %QuatZ
+@onready var quat_w: Label = %QuatW
+
 @onready var status_label: Label = %StatusLabel
 
 # 录制UI
@@ -171,7 +176,7 @@ func _process(delta):
 	var quat = Quaternion(raw_quat[0], raw_quat[1], raw_quat[2], raw_quat[3])
 
 	# 更新显示
-	update_display(accel, gyro, gravity, magneto)
+	update_display(accel, gyro, gravity, magneto, quat)
 
 	# 定时发送数据
 	send_timer += delta
@@ -189,7 +194,7 @@ func _process(delta):
 				status_label.text = "状态: 正常发送数据"
 				status_label.modulate = Color.GREEN
 
-func update_display(accel: Vector3, gyro: Vector3, gravity: Vector3, magneto: Vector3):
+func update_display(accel: Vector3, gyro: Vector3, gravity: Vector3, magneto: Vector3, quat: Quaternion):
 	accel_x.text = "X: %.3f" % accel.x
 	accel_y.text = "Y: %.3f" % accel.y
 	accel_z.text = "Z: %.3f" % accel.z
@@ -205,6 +210,11 @@ func update_display(accel: Vector3, gyro: Vector3, gravity: Vector3, magneto: Ve
 	magneto_x.text = "X: %.3f" % magneto.x
 	magneto_y.text = "Y: %.3f" % magneto.y
 	magneto_z.text = "Z: %.3f" % magneto.z
+
+	quat_x.text = "X: %.4f" % quat.x
+	quat_y.text = "Y: %.4f" % quat.y
+	quat_z.text = "Z: %.4f" % quat.z
+	quat_w.text = "W: %.4f" % quat.w
 
 func send_sensor_data(accel: Vector3, gyro: Vector3, gravity: Vector3, magneto: Vector3, quat: Quaternion):
 	var data = {
