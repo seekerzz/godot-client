@@ -1,4 +1,4 @@
-extends Control
+﻿extends Control
 
 # 传感器数据显示与发送脚本 - Godot 4
 # 将传感器数据通过UDP发送到PC端
@@ -51,11 +51,15 @@ var playback_frames: Array[Dictionary] = []
 var playback_index: int = 0
 var playback_timer: float = 0.0
 var current_playback_file: String = ""
+var _sensor_plugin = null
+var _plugin_ready := false
+var _plugin_check_elapsed := 0.0
+const PLUGIN_CHECK_TIMEOUT := 2.0
 
 func _ready():
 	init_network()
-	status_label.text = "状态: 传感器已启动"
-	status_label.modulate = Color.GREEN
+	status_label.text = "状态: 等待 SensorPlugin 初始化..."
+	status_label.modulate = Color.YELLOW
 
 	# 连接录制按钮
 	if record_button:
@@ -76,6 +80,48 @@ func _ready():
 
 	# 加载录制列表
 	refresh_recording_list()
+
+func _fatal_plugin_error(msg: String):
+	push_error(msg)
+	status_label.text = "错误: " + msg
+	status_label.modulate = Color.RED
+	set_process(false)
+
+func _verify_android_plugin_or_fail() -> bool:
+	var report_lines: PackedStringArray = []
+	if not OS.has_feature("android"):
+		report_lines.append("non_android_runtime_fail")
+		_write_plugin_report(report_lines)
+		return false
+
+	var has_plugin = Engine.has_singleton("SensorPlugin")
+	report_lines.append("has_singleton SensorPlugin=%s" % has_plugin)
+	if not has_plugin:
+		_write_plugin_report(report_lines)
+		return false
+
+	_sensor_plugin = Engine.get_singleton("SensorPlugin")
+	if _sensor_plugin == null:
+		report_lines.append("singleton_null")
+		_write_plugin_report(report_lines)
+		return false
+
+	var sensor_available = _sensor_plugin.is_sensor_available()
+	report_lines.append("sensor_available=%s" % sensor_available)
+	if not sensor_available:
+		_write_plugin_report(report_lines)
+		return false
+
+	_plugin_ready = true
+	report_lines.append("plugin_ready=true")
+	_write_plugin_report(report_lines)
+	return true
+
+func _write_plugin_report(lines: PackedStringArray):
+	var f := FileAccess.open("user://plugin_check.txt", FileAccess.WRITE)
+	if f:
+		for line in lines:
+			f.store_line(line)
 
 func init_network():
 	udp = PacketPeerUDP.new()
@@ -98,11 +144,31 @@ func _process(delta):
 			send_next_playback_frame()
 		return
 
-	# 获取传感器数据
-	var accel = Input.get_accelerometer()
-	var gyro = Input.get_gyroscope()
-	var gravity = Input.get_gravity()
-	var magneto = Input.get_magnetometer()
+	if not _plugin_ready:
+		_plugin_check_elapsed += delta
+		if _verify_android_plugin_or_fail():
+			status_label.text = "状态: SensorPlugin 已就绪"
+			status_label.modulate = Color.GREEN
+		elif _plugin_check_elapsed >= PLUGIN_CHECK_TIMEOUT:
+			_fatal_plugin_error("SensorPlugin singleton not found")
+		return
+
+	if not _plugin_ready or _sensor_plugin == null:
+		_fatal_plugin_error("SensorPlugin not ready at runtime")
+		return
+
+	var linear_accel = _sensor_plugin.get_linear_acceleration()
+	var raw_quat = _sensor_plugin.get_raw_quaternion()
+	if linear_accel.size() < 3 or raw_quat.size() < 4:
+		_fatal_plugin_error("SensorPlugin returned invalid data shape")
+		return
+
+	# 强制走 SensorPlugin: 使用线性加速度和四元数
+	var accel = Vector3(linear_accel[0], linear_accel[1], linear_accel[2])
+	var gyro = Vector3.ZERO
+	var gravity = Vector3.ZERO
+	var magneto = Vector3.ZERO
+	var quat = Quaternion(raw_quat[0], raw_quat[1], raw_quat[2], raw_quat[3])
 
 	# 更新显示
 	update_display(accel, gyro, gravity, magneto)
@@ -110,7 +176,7 @@ func _process(delta):
 	# 定时发送数据
 	send_timer += delta
 	if send_timer >= SEND_INTERVAL and is_connected:
-		send_sensor_data(accel, gyro, gravity, magneto)
+		send_sensor_data(accel, gyro, gravity, magneto, quat)
 		send_timer = 0.0
 
 	# 更新状态
@@ -140,12 +206,14 @@ func update_display(accel: Vector3, gyro: Vector3, gravity: Vector3, magneto: Ve
 	magneto_y.text = "Y: %.3f" % magneto.y
 	magneto_z.text = "Z: %.3f" % magneto.z
 
-func send_sensor_data(accel: Vector3, gyro: Vector3, gravity: Vector3, magneto: Vector3):
+func send_sensor_data(accel: Vector3, gyro: Vector3, gravity: Vector3, magneto: Vector3, quat: Quaternion):
 	var data = {
+		"source": "SensorPlugin",
 		"accel": {"x": accel.x, "y": accel.y, "z": accel.z},
 		"gyro": {"x": gyro.x, "y": gyro.y, "z": gyro.z},
 		"gravity": {"x": gravity.x, "y": gravity.y, "z": gravity.z},
 		"magneto": {"x": magneto.x, "y": magneto.y, "z": magneto.z},
+		"quaternion": {"x": quat.x, "y": quat.y, "z": quat.z, "w": quat.w},
 		"timestamp": Time.get_unix_time_from_system(),
 		"recorded": is_recording
 	}

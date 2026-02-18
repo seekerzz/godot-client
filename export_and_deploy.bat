@@ -94,7 +94,7 @@ echo.
 echo [5/5] Starting logcat monitoring...
 echo ==========================================
 echo Filters:
-echo   AndroidSensors: Plugin logs
+echo   SensorPlugin:  Plugin logs
 echo   Godot:          Godot engine logs
 echo   SensorSender:   GDScript logs
 echo.
@@ -103,6 +103,6 @@ echo ==========================================
 echo.
 
 adb logcat -c
-adb logcat AndroidSensors:D SensorSender:D Godot:D *:S
+adb logcat SensorPlugin:D SensorSender:D Godot:D *:S
 
 endlocal

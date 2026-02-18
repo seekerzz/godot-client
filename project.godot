@@ -32,8 +32,8 @@ window/handheld/orientation=1
 [input_devices]
 
 sensors/enable_accelerometer=true
-sensors/enable_gyroscope=true
 sensors/enable_gravity=true
+sensors/enable_gyroscope=true
 sensors/enable_magnetometer=true
 
 [network]

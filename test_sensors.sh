@@ -36,4 +36,4 @@ echo "Press Ctrl+C to stop"
 echo "=========================================="
 
 adb logcat -c
-adb logcat AndroidSensors:D SensorSender:D Godot:D *:S
+adb logcat SensorPlugin:D SensorSender:D Godot:D *:S
