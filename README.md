@@ -304,6 +304,7 @@ package/unique_name="com.example.sensordisplay"
 **原因**：
 - 项目设置中未启用传感器
 - 配置格式错误（缺少 `enable_` 前缀）
+- `SensorPlugin` 单例注册是异步的，应用刚启动时立即检查可能返回 `false`
 
 **解决**：
 ```ini
@@ -317,6 +318,11 @@ sensors/enable_magnetometer=true
 ; 错误写法 ❌
 ; sensors/accelerometer=true
 ```
+
+插件注册延时相关建议：
+- 启动后等待 `1~2` 秒再检查 `Engine.has_singleton("SensorPlugin")`
+- 建议在 `_process` 前几帧做轮询，超时（如 `2s`）再判定失败
+- 验证时不要只看 `am start -W` 成功，必须确认业务内插件状态
 
 ### 坑 4: Gradle 下载超时或失败
 
@@ -522,6 +528,8 @@ if data.size() >= 4:
 - [ ] 使用 `-r` 参数覆盖安装
 - [ ] 使用 `GodotAppLauncher` 启动
 - [ ] 使用 `logcat` 查看运行日志
+- [ ] 启动后等待 `1~2` 秒再判断 `SensorPlugin` 是否注册成功
+- [ ] 用 `adb shell run-as com.example.sensordisplay cat files/plugin_check.txt` 确认 `plugin_ready=true`
 
 ---
 
@@ -537,89 +545,3 @@ if data.size() >= 4:
 ## 许可证
 
 MIT License
-
----
-
-## 本次排障复盘（2026-02-18）
-
-下面是这次实机排障确认过的关键结论，优先级从高到低。
-
-### 1) `SensorPlugin` 单例注册失败的真实原因
-
-现象：
-- `Engine.has_singleton("SensorPlugin") == false`
-- `plugin_check.txt` 里长期是 `has_singleton SensorPlugin=false`
-
-根因链路：
-- 插件 AAR 里缺少 Godot 4.6 需要的 plugin v2 manifest 元数据，导致运行时不注册单例。
-- 同时工程里存在旧 AAR 与新 AAR 并存，Gradle 可能吃到旧包，修复不生效。
-
-已验证可行修复：
-- 在插件 manifest 增加：
-  - `android:name="org.godotengine.plugin.v2.SensorPlugin"`
-  - `android:value="com.example.sensorplugin.SensorPlugin"`
-- 统一 `gdap` 指向：
-  - `binary="res://android/plugins/SensorPlugin.aar"`
-- 避免硬编码引用旧包（如 `android/build/libs/release/SensorPlugin.aar`）。
-
-### 2) ADB 无线连接不稳定（会随机掉线）
-
-建议固定流程：
-1. 每条关键命令前先执行 `adb connect IP:PORT`，不要只连一次。
-2. 命令拆短执行，避免并行/长链命令。
-3. 出现 `device not found` 立刻重连，不要继续跑后续步骤。
-
-推荐重连模板（PowerShell）：
-```powershell
-$ok=$false
-for($i=1;$i -le 5;$i++){
-  $out = adb connect 192.168.50.11:34155 2>&1
-  if($out -match 'connected to|already connected'){ $ok=$true; break }
-  Start-Sleep -Milliseconds 400
-}
-if(-not $ok){ throw 'ADB reconnect failed' }
-```
-
-### 3) 误导性问题：应用能启动，不代表插件生效
-
-本次多次出现：
-- `am start -W` 显示 `Status: ok`
-- 但插件单例仍未注册
-
-因此验证标准必须是“业务内确认”，不能只看启动成功。
-
-推荐最终判定：
-```bash
-adb shell run-as com.example.sensordisplay cat files/plugin_check.txt
-```
-期望值：
-- `has_singleton SensorPlugin=true`
-- `sensor_available=1`
-- `plugin_ready=true`
-
-### 4) 导出污染问题
-
-曾出现临时目录被打入 APK（如 `assets/tmp_apk_*`）。
-建议：
-- 不要在项目根保留临时解包目录。
-- 若已污染，清理后重导出。
-
-### 5) 强约束模式（当前策略）
-
-当前项目要求：
-- 必须走 `SensorPlugin`
-- 如果插件不可用，直接报错，不回退 Godot 内置传感器
-
-这可以避免“看似正常运行、实则走了回退路径”的隐性失败。
-
-### 6) 最小稳定验证流程（建议固定）
-
-```bash
-adb connect 192.168.50.11:34155
-adb install -r builds/SensorDisplay.apk
-adb shell am force-stop com.example.sensordisplay
-adb shell am start -W -n "com.example.sensordisplay/com.godot.game.GodotAppLauncher"
-adb shell run-as com.example.sensordisplay cat files/plugin_check.txt
-```
-
-只要最后一条不是 `plugin_ready=true`，就不要进入上层联调。
