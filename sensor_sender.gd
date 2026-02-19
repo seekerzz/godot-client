@@ -217,25 +217,61 @@ func update_display(accel: Vector3, gyro: Vector3, gravity: Vector3, magneto: Ve
 	quat_w.text = "W: %.4f" % quat.w
 
 func send_sensor_data(accel: Vector3, gyro: Vector3, gravity: Vector3, magneto: Vector3, quat: Quaternion):
-	var data = {
-		"source": "SensorPlugin",
-		"accel": {"x": accel.x, "y": accel.y, "z": accel.z},
-		"gyro": {"x": gyro.x, "y": gyro.y, "z": gyro.z},
-		"gravity": {"x": gravity.x, "y": gravity.y, "z": gravity.z},
-		"magneto": {"x": magneto.x, "y": magneto.y, "z": magneto.z},
-		"quaternion": {"x": quat.x, "y": quat.y, "z": quat.z, "w": quat.w},
-		"timestamp": Time.get_unix_time_from_system(),
-		"recorded": is_recording
-	}
+	# 发送二进制传感器数据（28字节）
+	# 包结构: accel(x,y,z) + quaternion(x,y,z,w)，每个float 4字节
+	send_binary_sensor_data(accel, quat)
 
-	# 如果正在录制，保存到本地缓存
+	# 如果正在录制，保存到本地缓存（录制数据仍使用JSON格式便于存储）
 	if is_recording:
-		recorded_frames.append(data.duplicate())
+		var data = {
+			"source": "SensorPlugin",
+			"accel": {"x": accel.x, "y": accel.y, "z": accel.z},
+			"gyro": {"x": gyro.x, "y": gyro.y, "z": gyro.z},
+			"gravity": {"x": gravity.x, "y": gravity.y, "z": gravity.z},
+			"magneto": {"x": magneto.x, "y": magneto.y, "z": magneto.z},
+			"quaternion": {"x": quat.x, "y": quat.y, "z": quat.z, "w": quat.w},
+			"timestamp": Time.get_unix_time_from_system(),
+			"recorded": is_recording
+		}
+		recorded_frames.append(data)
 		# 更新UI显示帧数
 		if record_status_label:
 			record_status_label.text = "录制中... 帧数: " + str(recorded_frames.size())
 
-	send_data_packet(data)
+func send_binary_sensor_data(accel: Vector3, quat: Quaternion):
+	"""发送二进制传感器数据包（28字节）
+	包结构:
+	- accel.x (float, 4 bytes)
+	- accel.y (float, 4 bytes)
+	- accel.z (float, 4 bytes)
+	- quaternion.x (float, 4 bytes)
+	- quaternion.y (float, 4 bytes)
+	- quaternion.z (float, 4 bytes)
+	- quaternion.w (float, 4 bytes)
+	"""
+	var buffer = StreamPeerBuffer.new()
+	buffer.big_endian = false  # 使用小端序与server保持一致
+
+	# 写入加速度数据
+	buffer.put_float(accel.x)
+	buffer.put_float(accel.y)
+	buffer.put_float(accel.z)
+
+	# 写入四元数数据
+	buffer.put_float(quat.x)
+	buffer.put_float(quat.y)
+	buffer.put_float(quat.z)
+	buffer.put_float(quat.w)
+
+	# 发送数据包
+	var packet = buffer.data_array
+	var err = udp.put_packet(packet)
+	if err == OK:
+		# 调试输出（每60帧输出一次避免日志过多）
+		if recorded_frames.size() % 60 == 0:
+			print("[发送] 二进制数据 %d bytes | Accel: (%.3f, %.3f, %.3f) | Quat: (%.3f, %.3f, %.3f, %.3f)" % [
+				packet.size(), accel.x, accel.y, accel.z, quat.x, quat.y, quat.z, quat.w
+			])
 
 func send_data_packet(data: Dictionary):
 	var json_str = JSON.stringify(data)
